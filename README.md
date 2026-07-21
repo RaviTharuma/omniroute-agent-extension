@@ -15,6 +15,8 @@ Connect to your local or remote OmniRoute server and route queries across 44+ LL
 - **Native tool calls** — the host's built-in `openai-completions` handler runs every request, so you get real SSE streaming and native `tool_calls` for all models.
 - **Smart sorting** — models grouped by provider prefix, auto-routing models (`auto`, `auto/coding`, etc.) always first.
 - **Health monitoring** — periodic reachability checks with status bar indicators.
+- **Auto model discovery** — while the harness is running, re-fetch `/v1/models` on session start and on a configurable interval (default 5 minutes). Manual `/omni sync` still works anytime; control with `/omni autosync on|off|<interval>`.
+
 - **Env overrides** — `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, `OMNIROUTE_PROVIDER_NAME` skip the setup wizard entirely.
 
 ## Installation
