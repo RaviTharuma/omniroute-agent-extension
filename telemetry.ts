@@ -33,6 +33,16 @@ function positiveNumber(raw: unknown): number | undefined {
   return undefined;
 }
 
+/** Preserve present zero costs (free/cached); reject negatives and non-finite. */
+function nonNegativeNumber(raw: unknown): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return raw;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return undefined;
+}
+
 function header(headers: Headers, name: string): string | undefined {
   const value = headers.get(name);
   return value && value.trim() !== "" ? value.trim() : undefined;
@@ -42,6 +52,24 @@ export function tokensPerSecondFromUsage(usage: unknown): number | undefined {
   if (!usage || typeof usage !== "object") return undefined;
   const record = usage as Record<string, unknown>;
   return positiveNumber(record.tokens_per_second ?? record.tokensPerSecond);
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+/** True when requestUrl is under the configured OmniRoute serverUrl. */
+function isOmniRouteUrl(requestUrl: string, serverUrl: string | undefined): boolean {
+  if (!serverUrl || !serverUrl.trim()) return false;
+  try {
+    const req = new URL(requestUrl);
+    const base = new URL(normalizeBaseUrl(serverUrl));
+    if (req.origin !== base.origin) return false;
+    const basePath = base.pathname === "/" ? "" : base.pathname.replace(/\/+$/, "");
+    return req.pathname === basePath || req.pathname.startsWith(basePath + "/");
+  } catch {
+    return false;
+  }
 }
 
 export function parseGatewayTelemetry(headers: Headers, body: unknown): GatewayTelemetry {
@@ -56,8 +84,8 @@ export function parseGatewayTelemetry(headers: Headers, body: unknown): GatewayT
   const provider = header(headers, OMNIROUTE_TELEMETRY_HEADERS.provider);
   if (provider) telemetry.provider = provider;
   const costObj = usageRecord.cost;
-  const costTotal = costObj && typeof costObj === "object" ? positiveNumber((costObj as Record<string, unknown>).total) : undefined;
-  const cost = positiveNumber(header(headers, OMNIROUTE_TELEMETRY_HEADERS.responseCost)) ?? positiveNumber(usageRecord.cost) ?? costTotal;
+  const costTotal = costObj && typeof costObj === "object" ? nonNegativeNumber((costObj as Record<string, unknown>).total) : undefined;
+  const cost = nonNegativeNumber(header(headers, OMNIROUTE_TELEMETRY_HEADERS.responseCost)) ?? nonNegativeNumber(usageRecord.cost) ?? costTotal;
   if (cost !== undefined) telemetry.cost = cost;
   const tokensIn = positiveNumber(header(headers, OMNIROUTE_TELEMETRY_HEADERS.tokensIn)) ?? positiveNumber(usageRecord.prompt_tokens ?? usageRecord.input_tokens);
   if (tokensIn !== undefined) telemetry.tokensIn = tokensIn;
@@ -74,30 +102,62 @@ export function formatTelemetryStatus(t: GatewayTelemetry | undefined): string {
   if (!t || Object.keys(t).length === 0) return "tok/s unavailable";
   const parts = [t.tokensPerSecond !== undefined ? "tok/s " + t.tokensPerSecond.toFixed(1) : "tok/s unavailable"];
   if (t.cost !== undefined) parts.push("cost " + String(t.cost));
+  if (t.tokensIn !== undefined) parts.push("in " + String(t.tokensIn));
+  if (t.tokensOut !== undefined) parts.push("out " + String(t.tokensOut));
+  if (t.cache) parts.push("cache " + t.cache);
+  if (t.fallbackAttempts !== undefined) parts.push("fallbacks " + String(t.fallbackAttempts));
   if (t.model) parts.push(t.model);
   if (t.provider) parts.push(t.provider);
   return parts.join(" | ");
 }
 
-export function wrapFetchCaptureTelemetry(fetchImpl: typeof fetch, onCapture: (t: GatewayTelemetry) => void): typeof fetch {
+export type WrapFetchCaptureOptions = {
+  serverUrl?: string | (() => string | undefined);
+};
+
+export function wrapFetchCaptureTelemetry(
+  fetchImpl: typeof fetch,
+  onCapture: (t: GatewayTelemetry) => void,
+  options?: WrapFetchCaptureOptions,
+): typeof fetch {
   return async (input, init) => {
     const response = await fetchImpl(input, init);
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (INFERENCE_PATH.test(url)) onCapture(parseGatewayTelemetry(response.headers, undefined));
+    const serverUrl = typeof options?.serverUrl === "function" ? options.serverUrl() : options?.serverUrl;
+    if (INFERENCE_PATH.test(url) && isOmniRouteUrl(url, serverUrl)) {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        body = undefined;
+      }
+      onCapture(parseGatewayTelemetry(response.headers, body));
+    }
     return response;
   };
 }
 
 type PiLike = { on(event: string, handler: (event: any, ctx: any) => any): void };
 
-export function registerGatewayTelemetry(pi: PiLike): void {
+export type RegisterGatewayTelemetryOptions = {
+  getServerUrl?: () => string | undefined;
+};
+
+export function registerGatewayTelemetry(pi: PiLike, options?: RegisterGatewayTelemetryOptions): void {
   let captured: GatewayTelemetry | undefined;
   let restoreFetch: (() => void) | undefined;
   const install = () => {
     if (restoreFetch) return;
     const originalFetch = globalThis.fetch.bind(globalThis);
-    globalThis.fetch = wrapFetchCaptureTelemetry(originalFetch, (t) => { captured = t; });
-    restoreFetch = () => { globalThis.fetch = originalFetch; };
+    const wrappedFetch = wrapFetchCaptureTelemetry(
+      originalFetch,
+      (t) => { captured = t; },
+      { serverUrl: () => options?.getServerUrl?.() },
+    );
+    globalThis.fetch = wrappedFetch;
+    restoreFetch = () => {
+      if (globalThis.fetch === wrappedFetch) globalThis.fetch = originalFetch;
+    };
   };
   pi.on("session_start", (() => { captured = undefined; install(); }));
   pi.on("session_shutdown", (() => { restoreFetch?.(); restoreFetch = undefined; captured = undefined; }));

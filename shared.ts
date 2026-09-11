@@ -566,7 +566,7 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 
 	// On load: re-register from existing models.json (no network call)
 	reloadProviderFromModelsJson(pi, agentHome, config);
-	registerGatewayTelemetry(pi);
+	registerGatewayTelemetry(pi, { getServerUrl: () => loadConfig(agentHome).serverUrl });
 
 	pi.on("session_start", async (_event: any, ctx: any) => {
 		config = loadConfig(agentHome);
