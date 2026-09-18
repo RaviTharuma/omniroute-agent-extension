@@ -230,6 +230,11 @@ async function requestJson(config: OmniConfig, path: string, init: RequestInit =
 // via a proxy), so a tight timeout reports a false "unreachable" while real
 // requests succeed. Match requestJson's 10s timeout and retry once: the first
 // attempt warms the origin, the retry then succeeds in the common case.
+/** HTTP statuses that mean the origin answered. 401/403 are auth, not downtime. */
+export function isOmniRouteReachableHttpStatus(status: number): boolean {
+	return Number.isFinite(status) && status > 0 && status < 500;
+}
+
 async function checkHealth(agentHome: string, config: OmniConfig, context = "health"): Promise<boolean> {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const started = Date.now();
@@ -247,11 +252,20 @@ async function checkHealth(agentHome: string, config: OmniConfig, context = "hea
 			} catch {
 				// body teardown must never change the health result
 			}
-			if (res.ok) {
+			if (res.ok || isOmniRouteReachableHttpStatus(res.status)) {
 				// log slow successes — the cold-start signal that once caused
 				// false "unreachable" status
-				if (ms > CONNECTION_LOG_SLOW_MS)
-					appendConnectionLog(agentHome, { event: "health", context, attempt, ok: true, ms, server: config.serverUrl });
+				if (ms > CONNECTION_LOG_SLOW_MS || !res.ok)
+					appendConnectionLog(agentHome, {
+						event: "health",
+						context,
+						attempt,
+						ok: true,
+						ms,
+						status: res.status,
+						server: config.serverUrl,
+						error: res.ok ? undefined : `HTTP ${res.status} (reachable)`,
+					});
 				return true;
 			}
 			appendConnectionLog(agentHome, {

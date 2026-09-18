@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createOmniExtension } from "../shared.ts";
+import { createOmniExtension, isOmniRouteReachableHttpStatus } from "../shared.ts";
 
 test("normalizes legacy Pi catalog API identifiers when reloading models.json", async () => {
   const agentHome = mkdtempSync(join(tmpdir(), "omniroute-agent-extension-test-"));
@@ -67,4 +67,13 @@ test("normalizes legacy Pi catalog API identifiers when reloading models.json", 
     else process.env[envName] = previousHome;
     rmSync(agentHome, { recursive: true, force: true });
   }
+});
+
+test("treats 401/403 as reachable so a live gateway is not reported down", () => {
+  assert.equal(isOmniRouteReachableHttpStatus(200), true);
+  assert.equal(isOmniRouteReachableHttpStatus(401), true);
+  assert.equal(isOmniRouteReachableHttpStatus(403), true);
+  assert.equal(isOmniRouteReachableHttpStatus(404), true);
+  assert.equal(isOmniRouteReachableHttpStatus(500), false);
+  assert.equal(isOmniRouteReachableHttpStatus(0), false);
 });
