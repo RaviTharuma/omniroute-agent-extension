@@ -154,6 +154,9 @@ function normalizeServerUrl(value: string): string {
 }
 
 export function sanitizeAutoSyncIntervalMs(value: unknown): number {
+	if (typeof value === "string" && value.trim() === "") {
+		return DEFAULT_AUTO_SYNC_INTERVAL_MS;
+	}
 	if (value === undefined || value === null || value === "") {
 		return DEFAULT_AUTO_SYNC_INTERVAL_MS;
 	}
@@ -433,11 +436,24 @@ function persistModelsJson(agentHome: string, config: OmniConfig, models: Provid
 	writeFileSync(path, JSON.stringify(file, null, 2));
 }
 
+let registerChain: Promise<unknown> = Promise.resolve();
+
+function enqueueRegister<T>(fn: () => Promise<T>): Promise<T> {
+	const run = registerChain.then(fn, fn);
+	registerChain = run.then(
+		() => undefined,
+		() => undefined,
+	);
+	return run;
+}
+
 async function registerOmniProvider(pi: OmniPI, agentHome: string, config: OmniConfig): Promise<ProviderModelConfig[]> {
-	const models = await discoverModels(config, agentHome);
-	pi.registerProvider(config.providerName, buildProviderEntry(config, models));
-	persistModelsJson(agentHome, config, models);
-	return models;
+	return enqueueRegister(async () => {
+		const models = await discoverModels(config, agentHome);
+		pi.registerProvider(config.providerName, buildProviderEntry(config, models));
+		persistModelsJson(agentHome, config, models);
+		return models;
+	});
 }
 
 function reloadProviderFromModelsJson(pi: OmniPI, agentHome: string, config: OmniConfig): void {
@@ -583,6 +599,8 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 	let config = loadConfig(agentHome);
 	let healthTimer: ReturnType<typeof setInterval> | undefined;
 	let autoSyncTimer: ReturnType<typeof setInterval> | undefined;
+	let sessionGeneration = 0;
+	let syncWantsNotify = false;
 	let lastSyncCount = 0;
 	let lastSyncAt: string | null = null;
 	let syncInFlight: Promise<number> | null = null;
@@ -595,8 +613,8 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 	}
 
 	async function sync(ctx?: any, options?: { quiet?: boolean }): Promise<number> {
+		if (options?.quiet !== true) syncWantsNotify = true;
 		if (syncInFlight) return syncInFlight;
-		const quiet = options?.quiet === true;
 		syncInFlight = (async () => {
 			try {
 				config = loadConfig(agentHome);
@@ -606,7 +624,8 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 				lastSyncAt = new Date().toISOString();
 				const notifyCtx = ctx ?? sessionCtx;
 				(notifyCtx as any)?.modelRegistry?.refresh?.();
-				if (!quiet) {
+				const announce = syncWantsNotify;
+				if (announce) {
 					notifyCtx?.ui.notify(`OmniRoute synced ${models.length} model(s).`, "info");
 				} else if (previousCount > 0 && previousCount !== models.length) {
 					notifyCtx?.ui.notify(
@@ -617,6 +636,7 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 				return models.length;
 			} finally {
 				syncInFlight = null;
+				syncWantsNotify = false;
 			}
 		})();
 		return syncInFlight;
@@ -648,6 +668,7 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 	reloadProviderFromModelsJson(pi, agentHome, config);
 
 	pi.on("session_start", async (_event: any, ctx: any) => {
+		const generation = ++sessionGeneration;
 		sessionCtx = ctx;
 		config = loadConfig(agentHome);
 		if (!existsSync(configPath(agentHome)) && !process.env.OMNIROUTE_URL) {
@@ -656,6 +677,7 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 			return;
 		}
 		const ok = await checkHealth(agentHome, config, "session_start");
+		if (generation !== sessionGeneration) return;
 		ctx.ui.setStatus("omni", ok ? undefined : "OmniRoute unreachable");
 		if (!ok) {
 			ctx.ui.notify(
@@ -677,6 +699,7 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 	});
 
 	pi.on("session_shutdown", () => {
+		sessionGeneration++;
 		if (healthTimer) clearInterval(healthTimer);
 		healthTimer = undefined;
 		stopAutoSync();
@@ -803,6 +826,16 @@ export async function createOmniExtension(pi: OmniPI, opts: AgentHomeOptions): P
 
 				if (sub === "autosync") {
 					const arg = (rest[0] || "status").toLowerCase();
+					if (
+						process.env.OMNIROUTE_AUTO_SYNC_INTERVAL_MS !== undefined &&
+						arg !== "status" &&
+						arg !== ""
+					) {
+						return ctx.ui.notify(
+							"OMNIROUTE_AUTO_SYNC_INTERVAL_MS overrides /omni autosync. Unset it to change the interval.",
+							"warning",
+						);
+					}
 					if (arg === "status" || arg === "") {
 						return ctx.ui.notify(
 							[

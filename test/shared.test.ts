@@ -75,6 +75,7 @@ test("sanitizeAutoSyncIntervalMs defaults and clamps", () => {
   assert.equal(sanitizeAutoSyncIntervalMs(30_000), 60_000); // min 60s
   assert.equal(sanitizeAutoSyncIntervalMs(120_000), 120_000);
   assert.equal(sanitizeAutoSyncIntervalMs("nope"), 300_000);
+  assert.equal(sanitizeAutoSyncIntervalMs("   "), 300_000);
 });
 
 test("sanitizeConfig accepts autoSyncIntervalMs and env override", () => {

@@ -17,7 +17,7 @@ Connect to your local or remote OmniRoute server and route queries across 44+ LL
 - **Health monitoring** — periodic reachability checks with status bar indicators.
 - **Connection log** — every failed or abnormally slow connection attempt is appended as a JSON line to `<agent-home>/<state>/connection.log` for infra debugging; `ms` timings expose server cold starts, error fields include the fetch `cause` (e.g. `ECONNRESET`, `ETIMEDOUT`, TLS errors).
 - **Catalog autosync** — while the harness is running, re-fetch `/v1/models` on session start and on a configurable interval (default 5 minutes). Manual `/omni sync` still works anytime; control with `/omni autosync on|off|<interval>`.
-- **Env overrides** — `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, and `OMNIROUTE_PROVIDER_NAME` skip the setup wizard entirely. `OMNIROUTE_AUTO_SYNC_INTERVAL_MS` overrides the catalog autosync interval.
+- **Env overrides** — `OMNIROUTE_URL` skips the setup wizard. `OMNIROUTE_API_KEY` and `OMNIROUTE_PROVIDER_NAME` override those fields when a config already exists. `OMNIROUTE_AUTO_SYNC_INTERVAL_MS` overrides the catalog autosync interval.
 
 ## Installation
 
@@ -111,7 +111,7 @@ auto/cheap   auto/offline   auto/smart   auto/lkgp
 | `OMNIROUTE_PROVIDER_NAME` | Provider name shown in the picker (default: `omni`) |
 | `OMNIROUTE_AUTO_SYNC_INTERVAL_MS` | Background catalog re-fetch interval in milliseconds. `0` disables autosync. Default `300000` (5 minutes). Minimum `60000`. |
 
-When `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, or `OMNIROUTE_PROVIDER_NAME` are set, `/omni setup` is not required.
+When `OMNIROUTE_URL` is set, `/omni setup` is not required. `OMNIROUTE_API_KEY` and `OMNIROUTE_PROVIDER_NAME` only override those fields.
 
 ## Development
 
