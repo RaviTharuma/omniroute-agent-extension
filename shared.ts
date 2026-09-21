@@ -163,7 +163,9 @@ export function sanitizeAutoSyncIntervalMs(value: unknown): number {
 	const n = typeof value === "number" ? value : Number(String(value).trim());
 	if (!Number.isFinite(n) || n < 0) return DEFAULT_AUTO_SYNC_INTERVAL_MS;
 	if (n === 0) return 0; // explicit disable
-	return Math.max(MIN_AUTO_SYNC_INTERVAL_MS, Math.floor(n));
+	// Node timers above 2^31-1 ms collapse to a 1 ms delay.
+	const MAX_TIMER_MS = 2_147_483_647;
+	return Math.min(MAX_TIMER_MS, Math.max(MIN_AUTO_SYNC_INTERVAL_MS, Math.floor(n)));
 }
 
 export function sanitizeConfig(input: Partial<OmniConfig>): OmniConfig {
