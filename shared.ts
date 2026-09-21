@@ -536,8 +536,10 @@ async function runSetup(ctx: any, pi: OmniPI, agentHome: string): Promise<OmniCo
 		return undefined;
 	}
 
-	saveConfig(agentHome, next);
+	// 401/403 still counts as reachable. Persist only after registration
+	// succeeds so a later auth failure does not leave a half-saved setup.
 	const models = await registerOmniProvider(pi, agentHome, next);
+	saveConfig(agentHome, next);
 	;(ctx as any).modelRegistry?.refresh?.();
 	ctx.ui.notify(`Saved. Synced ${models.length} model(s).`, "info");
 	return next;
