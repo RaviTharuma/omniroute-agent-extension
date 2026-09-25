@@ -70,7 +70,7 @@ If changing function names or scan paths, update `AI.md` so future AI agents do 
 
 ## Testing (HARD)
 
-Follow `AGENTS.md` Testing (HARD): prefer E2E with a verifiable artifact; do not write unit tests after the code; keep real integration/telemetry/routing-correctness tests only.
+Follow `AGENTS.md` Testing (HARD): prefer E2E with a verifiable artifact; do not write unit tests after the code; keep real integration, telemetry, and routing-correctness tests; delete only low-signal unit tests already covered by E2E.
 
 ## Testing Checklist
 
